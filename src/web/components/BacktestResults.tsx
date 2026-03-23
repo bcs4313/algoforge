@@ -94,6 +94,41 @@ export function BacktestResults({ result, initialCapital }: BacktestResultsProps
 
   return (
     <div className="space-y-6">
+      {/* Buy & Hold comparison banner */}
+      <div className={`flex items-center justify-between px-5 py-3 rounded-xl border text-sm ${
+        stats.medianReturn >= stats.buyAndHoldReturn
+          ? "bg-emerald-500/10 border-emerald-500/20"
+          : "bg-amber-500/10 border-amber-500/20"
+      }`}>
+        <div className="flex items-center gap-3">
+          <span className="font-semibold text-white">Strategy vs Buy & Hold</span>
+          <span className={`font-mono font-bold ${stats.medianReturn >= stats.buyAndHoldReturn ? "text-emerald-400" : "text-amber-400"}`}>
+            {stats.medianReturn >= stats.buyAndHoldReturn ? "▲ Outperforms" : "▼ Underperforms"}
+          </span>
+        </div>
+        <div className="flex items-center gap-6 font-mono text-xs">
+          <span>
+            <span className="text-slate-500 mr-1">Strategy median</span>
+            <span className={stats.medianReturn >= 0 ? "text-emerald-400" : "text-red-400"}>
+              {stats.medianReturn >= 0 ? "+" : ""}{stats.medianReturn.toFixed(1)}%
+            </span>
+          </span>
+          <span>
+            <span className="text-slate-500 mr-1">Buy & Hold</span>
+            <span className={stats.buyAndHoldReturn >= 0 ? "text-teal-400" : "text-red-400"}>
+              {stats.buyAndHoldReturn >= 0 ? "+" : ""}{stats.buyAndHoldReturn.toFixed(1)}%
+            </span>
+          </span>
+          <span>
+            <span className="text-slate-500 mr-1">Alpha</span>
+            <span className={stats.medianReturn - stats.buyAndHoldReturn >= 0 ? "text-emerald-400" : "text-red-400"}>
+              {stats.medianReturn - stats.buyAndHoldReturn >= 0 ? "+" : ""}
+              {(stats.medianReturn - stats.buyAndHoldReturn).toFixed(1)}%
+            </span>
+          </span>
+        </div>
+      </div>
+
       {/* Stats row */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         <StatCard
@@ -144,7 +179,14 @@ export function BacktestResults({ result, initialCapital }: BacktestResultsProps
           <h3 className="text-sm font-semibold text-white">
             Monte Carlo Equity Curve
           </h3>
-          <span className="text-xs text-slate-600 ml-auto">10th / 50th / 90th percentile</span>
+          <div className="ml-auto flex items-center gap-4 text-xs text-slate-500">
+            <span className="flex items-center gap-1">
+              <span className="w-6 h-0.5 bg-teal-400 inline-block rounded" />Strategy
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-6 h-0.5 bg-orange-400 inline-block rounded" />Buy & Hold
+            </span>
+          </div>
         </div>
         <ResponsiveContainer width="100%" height={240}>
           <LineChart data={thinCurve} margin={{ left: 0, right: 8, top: 4, bottom: 0 }}>
@@ -206,9 +248,15 @@ export function BacktestResults({ result, initialCapital }: BacktestResultsProps
               strokeOpacity={0.4}
               name="P10"
             />
-            <Legend
-              wrapperStyle={{ fontSize: "11px", color: "#64748b" }}
-              iconType="line"
+            {/* Buy & Hold */}
+            <Line
+              type="monotone"
+              dataKey="buyAndHold"
+              stroke="#fb923c"
+              strokeWidth={2}
+              dot={false}
+              strokeDasharray="5 3"
+              name="Buy & Hold"
             />
           </LineChart>
         </ResponsiveContainer>
@@ -221,7 +269,7 @@ export function BacktestResults({ result, initialCapital }: BacktestResultsProps
           <h3 className="text-sm font-semibold text-white">
             Final Equity Distribution
           </h3>
-          <span className="text-xs text-slate-600 ml-auto">1,000 MC simulations</span>
+          <span className="text-xs text-slate-600 ml-auto">{returnDistribution.length.toLocaleString()} MC simulations</span>
         </div>
         <ResponsiveContainer width="100%" height={180}>
           <BarChart data={histData} margin={{ left: 0, right: 8, top: 4, bottom: 0 }}>
@@ -275,12 +323,32 @@ export function BacktestResults({ result, initialCapital }: BacktestResultsProps
                   <th className="text-left px-4 py-2 font-medium">Action</th>
                   <th className="text-right px-4 py-2 font-medium">Price</th>
                   <th className="text-right px-4 py-2 font-medium">Shares</th>
-                  <th className="text-right px-4 py-2 font-medium">P&L</th>
+                  <th className="text-right px-4 py-2 font-medium">Cost / Realized P&L</th>
                   <th className="text-right px-4 py-2 font-medium">Portfolio</th>
                 </tr>
               </thead>
               <tbody>
-                {trades.slice(0, 50).map((trade: Trade, i: number) => (
+                {trades.slice(0, 50).map((trade: Trade, i: number) => {
+                  const isBuy = trade.action === "BUY";
+                  // BUY: pnl is negative (capital deployed), show as cost
+                  // SELL: pnl is the realized gain/loss
+                  const pnlLabel = isBuy
+                    ? `−${Math.abs(trade.pnl).toFixed(2)}`
+                    : trade.pnl > 0
+                    ? `+${trade.pnl.toFixed(2)}`
+                    : trade.pnl < 0
+                    ? `-${Math.abs(trade.pnl).toFixed(2)}`
+                    : "$0.00";
+
+                  const pnlColor = isBuy
+                    ? "text-slate-500"
+                    : trade.pnl > 0
+                    ? "text-emerald-400"
+                    : trade.pnl < 0
+                    ? "text-red-400"
+                    : "text-slate-500";
+
+                  return (
                   <tr
                     key={i}
                     className="border-t border-white/[0.04] hover:bg-white/[0.02] transition-colors"
@@ -289,10 +357,10 @@ export function BacktestResults({ result, initialCapital }: BacktestResultsProps
                     <td className="px-4 py-2">
                       <span
                         className={`inline-flex items-center gap-1 font-semibold ${
-                          trade.action === "BUY" ? "text-emerald-400" : "text-red-400"
+                          isBuy ? "text-emerald-400" : "text-red-400"
                         }`}
                       >
-                        {trade.action === "BUY" ? (
+                        {isBuy ? (
                           <TrendingUp className="w-3 h-3" />
                         ) : (
                           <TrendingDown className="w-3 h-3" />
@@ -306,23 +374,21 @@ export function BacktestResults({ result, initialCapital }: BacktestResultsProps
                     <td className="px-4 py-2 text-right font-mono text-slate-400">
                       {trade.shares}
                     </td>
-                    <td
-                      className={`px-4 py-2 text-right font-mono ${
-                        trade.pnl > 0
-                          ? "text-emerald-400"
-                          : trade.pnl < 0
-                          ? "text-red-400"
-                          : "text-slate-500"
-                      }`}
-                    >
-                      {trade.pnl > 0 ? "+" : ""}
-                      {trade.pnl !== 0 ? `$${trade.pnl.toFixed(2)}` : "—"}
+                    <td className={`px-4 py-2 text-right font-mono ${pnlColor}`}>
+                      <span>{pnlLabel}</span>
+                      {isBuy && (
+                        <span className="block text-slate-600 text-[10px]">deployed</span>
+                      )}
+                      {!isBuy && (
+                        <span className="block text-slate-600 text-[10px]">realized</span>
+                      )}
                     </td>
                     <td className="px-4 py-2 text-right font-mono text-slate-300">
                       {formatCurrency(trade.portfolioValue)}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
             {trades.length > 50 && (

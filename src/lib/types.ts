@@ -52,6 +52,7 @@ export interface EquityPoint {
   p10: number;
   p50: number;
   p90: number;
+  buyAndHold: number;
 }
 
 export interface BacktestStats {
@@ -61,6 +62,7 @@ export interface BacktestStats {
   probabilityOfRuin: number;
   medianReturn: number;
   totalTrades: number;
+  buyAndHoldReturn: number;
 }
 
 export interface BacktestResult {

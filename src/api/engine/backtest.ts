@@ -2,7 +2,6 @@ import type {
   OHLCVBar,
   StrategyRules,
   Trade,
-  BacktestStats,
   BacktestResult,
   EquityPoint,
 } from "../../lib/types";
@@ -15,7 +14,6 @@ interface SimResult {
 }
 
 function simulateOnce(
-  bars: OHLCVBar[],
   pnlList: number[],
   initialCapital: number
 ): { finalEquity: number; equityCurve: number[] } {
@@ -26,6 +24,13 @@ function simulateOnce(
     curve.push(equity);
   }
   return { finalEquity: equity, equityCurve: curve };
+}
+
+// Buy & hold: buy on day 1, sell on last day — equity tracks price proportionally
+function computeBuyAndHold(bars: OHLCVBar[], initialCapital: number): number[] {
+  if (bars.length === 0) return [initialCapital];
+  const startPrice = bars[0].close;
+  return bars.map((b) => (b.close / startPrice) * initialCapital);
 }
 
 function runActualBacktest(
@@ -52,7 +57,7 @@ function runActualBacktest(
           action: "BUY",
           price: sig.close,
           shares,
-          pnl: 0,
+          pnl: -(shares * sig.close),
           portfolioValue,
         });
       }
@@ -90,12 +95,9 @@ function runActualBacktest(
     });
   }
 
-  // Build equity curve from trades
   const equityCurve: number[] = [initialCapital];
-  let runningEquity = initialCapital;
   for (const trade of trades) {
-    runningEquity = trade.portfolioValue;
-    equityCurve.push(runningEquity);
+    equityCurve.push(trade.portfolioValue);
   }
 
   return { finalEquity: portfolioValue, equityCurve, trades };
@@ -108,7 +110,6 @@ function computeSharpe(returns: number[]): number {
     returns.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / returns.length;
   const stdDev = Math.sqrt(variance);
   if (stdDev === 0) return 0;
-  // Annualize assuming daily returns (252 trading days)
   return (mean / stdDev) * Math.sqrt(252);
 }
 
@@ -133,18 +134,26 @@ export function runBacktest(
   bars: OHLCVBar[],
   rules: StrategyRules,
   initialCapital = 10000,
-  iterations = 1000
+  iterations = 500
 ): BacktestResult {
-  // Run actual deterministic backtest
   const actual = runActualBacktest(bars, rules, initialCapital);
+  const buyAndHoldCurve = computeBuyAndHold(bars, initialCapital);
+  const buyAndHoldFinal = buyAndHoldCurve[buyAndHoldCurve.length - 1];
+  const buyAndHoldReturn = ((buyAndHoldFinal - initialCapital) / initialCapital) * 100;
 
-  // Get per-trade pnls for Monte Carlo resampling
   const tradePnLs = actual.trades
     .filter((t) => t.action === "SELL")
     .map((t) => t.pnl);
 
-  // If no trades, return empty result
+  // No trades — still return buy & hold
   if (tradePnLs.length === 0) {
+    const bah = buyAndHoldCurve.map((v, i) => ({
+      date: bars[i]?.date ?? "",
+      p10: initialCapital,
+      p50: initialCapital,
+      p90: initialCapital,
+      buyAndHold: v,
+    }));
     return {
       stats: {
         sharpeRatio: 0,
@@ -153,39 +162,47 @@ export function runBacktest(
         probabilityOfRuin: 0,
         medianReturn: 0,
         totalTrades: 0,
+        buyAndHoldReturn: Math.round(buyAndHoldReturn * 10) / 10,
       },
-      equityCurve: [{ date: bars[0]?.date ?? "", p10: initialCapital, p50: initialCapital, p90: initialCapital }],
+      equityCurve: bah,
       returnDistribution: [initialCapital],
       trades: [],
     };
   }
 
-  // Monte Carlo: resample trade PnL order
+  // Monte Carlo
   const finalEquities: number[] = [];
   const allCurves: number[][] = [];
 
   for (let iter = 0; iter < iterations; iter++) {
-    // Resample with replacement
     const resampled: number[] = Array.from(
       { length: tradePnLs.length },
       () => tradePnLs[Math.floor(Math.random() * tradePnLs.length)]
     );
-    const { finalEquity, equityCurve } = simulateOnce(bars, resampled, initialCapital);
+    const { finalEquity, equityCurve } = simulateOnce(resampled, initialCapital);
     finalEquities.push(finalEquity);
     allCurves.push(equityCurve);
   }
 
-  // Align equity curves (pad shorter ones)
+  // Align MC curves
   const maxLen = Math.max(...allCurves.map((c) => c.length));
   const aligned = allCurves.map((c) => {
     while (c.length < maxLen) c.push(c[c.length - 1]);
     return c;
   });
 
-  // Build percentile equity curve
-  const equityCurve: EquityPoint[] = [];
-  // Use trade dates for x-axis labels
+  // Build buy & hold interpolated to same number of points as MC curves
+  // Map each MC step index to a proportional position in the price series
+  const bahInterpolated = Array.from({ length: maxLen }, (_, i) => {
+    const ratio = i / Math.max(maxLen - 1, 1);
+    const barIdx = Math.round(ratio * (bars.length - 1));
+    return buyAndHoldCurve[barIdx];
+  });
+
+  // Trade dates for x-axis
   const tradeDates = [bars[0].date, ...actual.trades.map((t) => t.date)];
+
+  const equityCurve: EquityPoint[] = [];
   for (let i = 0; i < maxLen; i++) {
     const vals = aligned.map((c) => c[i]);
     const dateLabel = tradeDates[i] ?? tradeDates[tradeDates.length - 1];
@@ -194,23 +211,18 @@ export function runBacktest(
       p10: percentile(vals, 10),
       p50: percentile(vals, 50),
       p90: percentile(vals, 90),
+      buyAndHold: Math.round(bahInterpolated[i] * 100) / 100,
     });
   }
 
   // Stats
   const wins = tradePnLs.filter((p) => p > 0).length;
-  const winRate = tradePnLs.length > 0 ? (wins / tradePnLs.length) * 100 : 0;
+  const winRate = (wins / tradePnLs.length) * 100;
   const maxDrawdown = computeMaxDrawdown(actual.equityCurve);
-
-  // Sharpe from daily-ish returns (between actual trades)
   const tradeReturns = tradePnLs.map((pnl) => pnl / initialCapital);
   const sharpeRatio = computeSharpe(tradeReturns);
-
   const probabilityOfRuin =
-    (finalEquities.filter((e) => e < initialCapital * 0.5).length /
-      finalEquities.length) *
-    100;
-
+    (finalEquities.filter((e) => e < initialCapital * 0.5).length / finalEquities.length) * 100;
   const medianFinalEquity = percentile(finalEquities, 50);
   const medianReturn = ((medianFinalEquity - initialCapital) / initialCapital) * 100;
 
@@ -222,6 +234,7 @@ export function runBacktest(
       probabilityOfRuin: Math.round(probabilityOfRuin * 10) / 10,
       medianReturn: Math.round(medianReturn * 10) / 10,
       totalTrades: actual.trades.filter((t) => t.action === "SELL").length,
+      buyAndHoldReturn: Math.round(buyAndHoldReturn * 10) / 10,
     },
     equityCurve,
     returnDistribution: finalEquities,
