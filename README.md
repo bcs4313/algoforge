@@ -2,7 +2,7 @@
 
 > AI-driven algorithmic trading strategy builder with drag-and-drop technical indicator rules, Monte Carlo backtesting, and buy & hold comparison.
 
-![AlgoForge Landing](https://storage.googleapis.com/runable-templates/cli-uploads%2FF4C8vgiuelhItrKIMzjuDj7IliguAOyN%2Fuc8xZOdX1uyI3YRS1s1DT%2Freadme_landing.png)
+![AlgoForge Landing](https://i.imgur.com/zfdSQfY.png)
 
 ---
 
@@ -102,7 +102,7 @@ Open [http://localhost:9925](http://localhost:9925).
 
 ### Create an Account
 
-![Sign Up](https://storage.googleapis.com/runable-templates/cli-uploads%2FF4C8vgiuelhItrKIMzjuDj7IliguAOyN%2Fxpch2_twcFKR_yhQ2OF9R%2Freadme_signup.png)
+![Sign Up](https://i.imgur.com/zBdfhxk.png)
 
 Sign up with any email and password (min 8 characters). Strategies are saved per account.
 
@@ -110,7 +110,7 @@ Sign up with any email and password (min 8 characters). Strategies are saved per
 
 ### The Builder Interface
 
-![Builder](https://storage.googleapis.com/runable-templates/cli-uploads%2FF4C8vgiuelhItrKIMzjuDj7IliguAOyN%2F0xEASPo8P9wvWqNRvmnwS%2Freadme_builder_empty.png)
+![Builder](https://i.imgur.com/iyI9WgQ.png)
 
 The builder has three panels:
 
